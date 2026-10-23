@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="theme-color" content="#5bc0eb">
+  <title>Consultor médico</title>
+  <link rel="stylesheet" href="style.css">
+  <script src="config.js"></script>
+  <script src="script.js" defer></script>
+</head>
+<body>
+  <main class="app">
+    <!-- Zona de chat -->
+    <section class="zona-de-chat" id="zona-de-chat"
+      aria-label="Zona de chat">
+      <header class="encabezado">
+        <div class="logo" aria-hidden="true">✚</div>
+        <div>
+          <h1>Consultor médico</h1>
+          <p><span class="estado"></span> Asistente virtual</p>
+        </div>
+      </header>
+
+      <div class="mensajes" id="mensajes" aria-live="polite"
+        aria-relevant="additions text">
+        <article class="mensaje mensaje-agente">
+          <div class="avatar" aria-hidden="true">✚</div>
+          <div class="burbuja">
+            <span class="nombre">Consultor médico</span>
+            <p>¡Hola! 👋 Soy tu Consultor médico. Estoy acá para ayudarte
+              con dudas sobre trámites, documentación y temas específicos.
+              ¿Qué necesitás consultar hoy?</p>
+            <time>Ahora</time>
+          </div>
+        </article>
+      </div>
+    </section>
+
+    <!-- Zona de escritura -->
+    <section class="zona-de-escritura" id="zona-de-escritura"
+      aria-label="Zona de escritura">
+      <form id="formulario-chat">
+        <label for="entrada-mensaje">¿En qué puedo ayudarte?</label>
+
+        <div class="entrada-contenedor">
+          <textarea
+            id="entrada-mensaje"
+            name="mensaje"
+            placeholder="Escribí tu consulta..."
+            rows="2"
+            maxlength="4000"
+            required
+            aria-describedby="ayuda-entrada"
+          ></textarea>
+
+          <button id="boton-enviar" type="submit"
+            aria-label="Enviar mensaje">
+            <span id="texto-boton">Enviar</span>
+            <span aria-hidden="true">➤</span>
+          </button>
+        </div>
+
+        <div class="pie-entrada">
+          <span id="ayuda-entrada">Enter para enviar · Shift + Enter para
+            escribir otra línea</span>
+          <span id="contador">0/4000</span>
+        </div>
+        <p class="aviso">La información del asistente es orientativa y
+          no reemplaza la evaluación de un profesional de la salud.</p>
+      </form>
+    </section>
+  </main>
+</body>
+</html>
