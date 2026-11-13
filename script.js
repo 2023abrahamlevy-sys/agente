@@ -1,6 +1,9 @@
+// Configuración
 // Configuración de seguridad y tiempos.
 const TIEMPO_LIMITE = 30000;
-const ESPERA_ENTRE_ENVIOS = 1000;
+const ESPERA_ENTRE_ENVIOS = 1500;
+const LIMITE_CARACTERES = 500;
+const CLAVE_SESION = "promptin_session_id";
 
 // Elementos principales del DOM.
 const formulario = document.getElementById("formulario-chat");
@@ -10,12 +13,46 @@ const textoBoton = document.getElementById("texto-boton");
 const mensajes = document.getElementById("mensajes");
 const contador = document.getElementById("contador");
 
+// Estados de la aplicación.
 let enviando = false;
 let ultimoEnvio = 0;
+let estadoActual = "éxito";
+
+// Genera un identificador único.
+function generarSessionId() {
+  if (
+    typeof crypto !== "undefined" &&
+    typeof crypto.randomUUID === "function"
+  ) {
+    return crypto.randomUUID();
+  }
+
+  return `sesion-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+}
+
+// Recupera o crea una sesión y la guarda.
+function obtenerSessionId() {
+  try {
+    const guardado = localStorage.getItem(CLAVE_SESION);
+
+    if (guardado) return guardado;
+
+    const nuevo = generarSessionId();
+    localStorage.setItem(CLAVE_SESION, nuevo);
+
+    return nuevo;
+  } catch (error) {
+    // Si no hay almacenamiento, se usa una sesión en memoria.
+    return generarSessionId();
+  }
+}
+
+// Se genera una sola vez al iniciar la aplicación.
+const sessionId = obtenerSessionId();
 
 // Actualiza el contador de caracteres.
 entrada.addEventListener("input", () => {
-  contador.textContent = `${entrada.value.length}/4000`;
+  contador.textContent = `${entrada.value.length}/${LIMITE_CARACTERES}`;
 });
 
 // Enter envía; Shift + Enter agrega una nueva línea.
@@ -120,115 +157,193 @@ function mostrarCargando() {
   return articulo;
 }
 
-// Acepta formatos habituales de respuesta del webhook.
-function extraerRespuesta(datos) {
-  if (typeof datos === "string" && datos.trim()) {
-    return datos.trim();
-  }
+// Comprueba si la URL está configurada.
+function webhookConfigurado() {
+  const url = String(WEBHOOK_URL || "").trim().toLowerCase();
 
-  if (datos && typeof datos === "object") {
-    const respuesta =
-      datos.respuesta ??
-      datos.answer ??
-      datos.message ??
-      datos.output;
-
-    if (typeof respuesta === "string" && respuesta.trim()) {
-      return respuesta.trim();
-    }
-  }
-
-  throw new Error("La respuesta recibida no tiene un formato válido.");
+  return (
+    url !== "" &&
+    !url.includes("aca va") &&
+    !url.includes("ejemplo-webhook-prueba")
+  );
 }
 
-// Envía la consulta y gestiona los estados de la interfaz.
+// Extrae la respuesta de Make.
+function extraerRespuesta(texto) {
+  if (texto === "") {
+    return "(respuesta vacía)";
+  }
+
+  try {
+    const datos = JSON.parse(texto);
+
+    if (
+      datos !== null &&
+      typeof datos === "object" &&
+      !Array.isArray(datos)
+    ) {
+      const campos = [
+        "response",
+        "respuesta",
+        "message",
+        "mensaje"
+      ];
+
+      for (const campo of campos) {
+        const valor = datos[campo];
+
+        if (typeof valor === "string" && valor.trim() !== "") {
+          return valor;
+        }
+      }
+
+      return "Make respondió, pero sin el campo response";
+    }
+
+    // Acepta números, booleanos, listas y otros valores JSON.
+    return texto;
+  } catch (error) {
+    // También acepta respuestas de texto como Accepted.
+    return texto;
+  }
+}
+
+// Comprueba la URL antes de enviar.
+if (!webhookConfigurado()) {
+  estadoActual = "error";
+}
+
+// Envía la consulta y gestiona los estados.
 formulario.addEventListener("submit", async (evento) => {
   evento.preventDefault();
 
   const consulta = entrada.value.trim();
+
   if (!consulta || enviando) return;
 
-  // Evita envíos demasiado seguidos.
-  const ahora = Date.now();
-  if (ahora - ultimoEnvio < ESPERA_ENTRE_ENVIOS) return;
-  ultimoEnvio = ahora;
-
-  // Verifica que exista una URL de webhook configurada.
-  if (
-    !WEBHOOK_URL ||
-    WEBHOOK_URL.includes("ejemplo-webhook-prueba")
-  ) {
+  // Valida el límite de caracteres.
+  if (consulta.length > LIMITE_CARACTERES) {
+    estadoActual = "error";
     agregarMensaje(
-      "La interfaz está lista, pero falta configurar la URL real del webhook.",
+      "El mensaje no puede superar los 500 caracteres.",
       "error"
     );
     return;
   }
 
+  // Comprueba que exista una URL válida.
+  if (!webhookConfigurado()) {
+    estadoActual = "error";
+    agregarMensaje(
+      "Falta pegar la URL de tu webhook en config.js",
+      "error"
+    );
+    return;
+  }
+
+  // Evita envíos demasiado seguidos.
+  const ahora = Date.now();
+
+  if (ahora - ultimoEnvio < ESPERA_ENTRE_ENVIOS) {
+    return;
+  }
+
+  ultimoEnvio = ahora;
   enviando = true;
+  estadoActual = "cargando";
+
+  // Bloquea los controles durante el envío.
   botonEnviar.disabled = true;
-  textoBoton.textContent = "Enviando...";
   entrada.disabled = true;
+  textoBoton.textContent = "Enviando...";
 
   agregarMensaje(consulta, "usuario");
+
   entrada.value = "";
-  contador.textContent = "0/4000";
+  contador.textContent = `0/${LIMITE_CARACTERES}`;
 
   const indicador = mostrarCargando();
   const controlador = new AbortController();
-  const temporizador = setTimeout(
-    () => controlador.abort(),
-    TIEMPO_LIMITE
-  );
+
+  let tiempoAgotado = false;
+
+  const temporizador = setTimeout(() => {
+    tiempoAgotado = true;
+    controlador.abort();
+  }, TIEMPO_LIMITE);
 
   try {
-    // Envía el texto al webhook mediante POST.
+    // Prepara los tres campos exactos para Make.
+    const datos = {
+      sessionId,
+      mensaje: consulta,
+      fecha: new Date().toISOString()
+    };
+
+    // Envía la consulta mediante POST.
     const respuesta = await fetch(WEBHOOK_URL, {
       method: "POST",
       headers: {
-        "Content-Type": "application/json",
-        "Accept": "application/json"
+        "Content-Type": "application/json"
       },
-      body: JSON.stringify({
-        mensaje: consulta,
-        agente: "Consultor médico"
-      }),
+      body: JSON.stringify(datos),
       signal: controlador.signal
     });
 
+    // Siempre lee la respuesta como texto.
+    const textoRecibido = await respuesta.text();
+
     if (!respuesta.ok) {
-      throw new Error(`El servidor respondió con error ${respuesta.status}.`);
+      throw new Error(
+        `Make respondió con error (código ${respuesta.status}). Revisá que tu escenario esté en Active o que hayas apretado Run once.`
+      );
     }
 
-    const tipoContenido = respuesta.headers.get("content-type") || "";
-    let datos;
+    const textoRespuesta = extraerRespuesta(textoRecibido);
 
-    if (tipoContenido.includes("application/json")) {
-      datos = await respuesta.json();
-    } else {
-      datos = await respuesta.text();
-    }
-
-    const textoRespuesta = extraerRespuesta(datos);
+    estadoActual = "éxito";
 
     indicador.remove();
     agregarMensaje(textoRespuesta, "agente");
+
   } catch (error) {
+    estadoActual = "error";
+
     indicador.remove();
 
-    const mensajeError = error.name === "AbortError"
-      ? "La consulta tardó demasiado. Intentá nuevamente."
-      : "No pudimos obtener una respuesta. Revisá la conexión y la configuración del webhook.";
+    let mensajeError;
+
+    if (tiempoAgotado || error.name === "AbortError") {
+      mensajeError =
+        "La consulta tardó demasiado. Intentá nuevamente.";
+    } else if (error instanceof TypeError) {
+      mensajeError =
+        "No se pudo conectar con Make. Revisá tu conexión e intentá nuevamente.";
+    } else if (error.message.startsWith("Make respondió con error")) {
+      mensajeError = error.message;
+    } else {
+      mensajeError =
+        "Ocurrió un error inesperado al procesar la respuesta. Intentá nuevamente.";
+    }
 
     agregarMensaje(mensajeError, "error");
+
     console.error("Error en la consulta:", error);
+
   } finally {
+    // Limpia el temporizador y restablece siempre la interfaz.
     clearTimeout(temporizador);
+
+    if (indicador.isConnected) {
+      indicador.remove();
+    }
 
     enviando = false;
     botonEnviar.disabled = false;
     entrada.disabled = false;
     textoBoton.textContent = "Enviar";
+
     entrada.focus();
   }
 });
+ de seguridad y tiempos.
